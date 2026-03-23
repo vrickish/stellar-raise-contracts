@@ -16,3 +16,7 @@ Thumbs.db
 .kiro/
 
 contracts/*/test_snapshots/
+
+# BMad methodology files
+BM/
+brief.md

@@ -384,3 +384,215 @@ fn test_update_metadata_when_not_active_panics() {
     client.cancel();
     client.update_metadata(&creator, &None, &None, &None);
 }
+
+// ── Admin Upgrade Mechanism Tests ───────────────────────────────────────────
+
+#[test]
+fn test_upgrade_successful_by_admin() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    
+    // Initialize with admin address
+    client.initialize(
+        &admin,
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Create a new WASM hash for upgrade
+    let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    
+    // Admin should be able to upgrade
+    client.upgrade(&new_wasm_hash);
+    
+    // Verify the upgrade was successful (no panic)
+    // Note: In Soroban tests, we can't directly verify the WASM was updated,
+    // but we can verify the function executed without panic
+}
+
+#[test]
+#[should_panic(expected = "not authorized")]
+fn test_upgrade_fails_by_non_admin() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    
+    // Initialize with admin address
+    client.initialize(
+        &admin,
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Create a new WASM hash for upgrade
+    let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    
+    // Try to upgrade with a non-admin address
+    let non_admin = Address::generate(&env);
+    
+    // Mock auth for non-admin
+    env.mock_all_auths_allowing_non_root_auth();
+    env.set_auths(&[]);
+    
+    client.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &non_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "upgrade",
+            args: soroban_sdk::vec![&env, new_wasm_hash],
+            sub_invokes: &[],
+        },
+    }]);
+    
+    client.upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn test_admin_address_stored_correctly() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    
+    // Initialize with a specific admin address
+    let designated_admin = Address::generate(&env);
+    
+    client.initialize(
+        &designated_admin,
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Create a new WASM hash for upgrade
+    let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    
+    // Only the designated admin should be able to upgrade
+    // (test would panic if wrong admin)
+    env.mock_all_auths_allowing_non_root_auth();
+    env.set_auths(&[]);
+    
+    client.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &designated_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "upgrade",
+            args: soroban_sdk::vec![&env, new_wasm_hash],
+            sub_invokes: &[],
+        },
+    }]);
+    
+    client.upgrade(&new_wasm_hash);
+}
+
+#[test]
+#[should_panic]
+fn test_upgrade_fails_with_wrong_admin() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    
+    // Initialize with a specific admin address
+    let designated_admin = Address::generate(&env);
+    
+    client.initialize(
+        &designated_admin,
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Create a new WASM hash for upgrade
+    let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    
+    // Try to upgrade with a different admin address
+    let wrong_admin = Address::generate(&env);
+    
+    env.mock_all_auths_allowing_non_root_auth();
+    env.set_auths(&[]);
+    
+    client.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &wrong_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "upgrade",
+            args: soroban_sdk::vec![&env, new_wasm_hash],
+            sub_invokes: &[],
+        },
+    }]);
+    
+    client.upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn test_upgrade_does_not_affect_campaign_state() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    
+    // Initialize campaign
+    client.initialize(
+        &admin,
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Make a contribution
+    let contributor = Address::generate(&env);
+    mint_to(&env, &token_address, &admin, &contributor, 500_000);
+    client.contribute(&contributor, &500_000);
+    
+    // Record state before upgrade
+    let total_raised_before = client.total_raised();
+    let contribution_before = client.contribution(&contributor);
+    let goal_before = client.goal();
+    let deadline_before = client.deadline();
+    
+    // Perform upgrade
+    let new_wasm_hash = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    client.upgrade(&new_wasm_hash);
+    
+    // Verify state is preserved after upgrade
+    assert_eq!(client.total_raised(), total_raised_before);
+    assert_eq!(client.contribution(&contributor), contribution_before);
+    assert_eq!(client.goal(), goal_before);
+    assert_eq!(client.deadline(), deadline_before);
+}

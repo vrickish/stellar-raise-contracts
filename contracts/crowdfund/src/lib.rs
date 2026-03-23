@@ -132,7 +132,7 @@ impl CrowdfundContract {
     /// * If platform fee exceeds 10,000 (100%).
     pub fn initialize(
         env: Env,
-        _admin: Address,
+        admin: Address,
         creator: Address,
         token: Address,
         goal: i128,
@@ -164,30 +164,16 @@ impl CrowdfundContract {
             env.storage().instance().set(&DataKey::BonusGoal, &bg);
         }
 
-        if let Some(bg) = bonus_goal {
-            if bg <= goal {
-                panic!("bonus goal must be greater than primary goal");
-            }
-            env.storage().instance().set(&DataKey::BonusGoal, &bg);
-        }
-
         if let Some(bg_description) = bonus_goal_description {
             env.storage()
                 .instance()
                 .set(&DataKey::BonusGoalDescription, &bg_description);
         }
 
+        // Store admin address for upgrade authorization
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Creator, &creator);
         env.storage().instance().set(&DataKey::Token, &token);
-
-        /// Returns the list of all contributor addresses.
-        #[allow(dead_code)]
-        pub fn contributors(env: Env) -> Vec<Address> {
-            env.storage()
-                .instance()
-                .get(&DataKey::Contributors)
-                .unwrap_or(Vec::new(&env))
-        }
 
         env.storage().instance().set(&DataKey::Goal, &goal);
         env.storage().instance().set(&DataKey::Deadline, &deadline);
@@ -195,9 +181,6 @@ impl CrowdfundContract {
             .instance()
             .set(&DataKey::MinContribution, &min_contribution);
         env.storage().instance().set(&DataKey::TotalRaised, &0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::BonusGoalReachedEmitted, &false);
         env.storage()
             .instance()
             .set(&DataKey::BonusGoalReachedEmitted, &false);
